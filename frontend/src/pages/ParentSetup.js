@@ -1,53 +1,208 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { setupParent, createChild } from '../api';
+import { setupParent, createChild, updatePreferences } from '../api';
 import { session } from '../session';
 
 const GRADES = [1,2,3,4,5,6,7,8,9,10,11,12];
-const MONTHS = [
-  'January','February','March','April','May','June',
-  'July','August','September','October','November','December'
-];
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const GENDER_OPTIONS = ['Boy', 'Girl', 'Non-binary', 'Prefer not to say'];
 
 const SENSITIVE_TOPICS = [
-  { key: 'reproduction',        label: 'Human Reproduction',          sub: 'How babies are born, reproductive biology' },
-  { key: 'puberty',             label: 'Puberty & Body Changes',       sub: 'Physical changes during adolescence' },
-  { key: 'body_systems_full',   label: 'Human Body Systems (full)',    sub: 'Detailed anatomy and body part naming' },
-  { key: 'mental_health',       label: 'Mental Health',                sub: 'Brain chemistry, emotions, psychology' },
-  { key: 'substances',          label: 'Drugs & Substances',           sub: 'Effects of drugs, alcohol on the body' },
-  { key: 'evolution',           label: 'Evolution',                    sub: 'Origins of species, natural selection' },
-  { key: 'climate_change',      label: 'Climate Change',               sub: 'Environmental science, climate topics' },
-  { key: 'death_grief',         label: 'Death & Grief',                sub: 'In English passages and discussions' },
-  { key: 'divorce_family',      label: 'Divorce & Family Breakdown',   sub: 'Family structure topics' },
-  { key: 'violence_conflict',   label: 'Violence & Conflict',          sub: 'Beyond age-appropriate adventure stories' },
-  { key: 'relationships_attraction', label: 'Relationships & Attraction', sub: 'Romantic relationships, attraction' },
-  { key: 'drugs_alcohol',       label: 'Drugs & Alcohol',              sub: 'For Jarvis conversations' },
-  { key: 'political_topics',    label: 'Political Topics',             sub: 'Political opinions and debates' },
-  { key: 'religious_topics',    label: 'Religious Topics',             sub: 'Religious beliefs and practices' },
+  { key: 'reproduction',           label: 'Human Reproduction',           sub: 'How babies are born, reproductive biology' },
+  { key: 'puberty',                label: 'Puberty & Body Changes',        sub: 'Physical changes during adolescence' },
+  { key: 'body_systems_full',      label: 'Human Body Systems (detailed)', sub: 'Detailed anatomy and body part naming' },
+  { key: 'mental_health',          label: 'Mental Health',                 sub: 'Brain chemistry, emotions, psychology' },
+  { key: 'substances',             label: 'Drugs & Substances',            sub: 'Effects of drugs and alcohol on the body' },
+  { key: 'evolution',              label: 'Evolution',                     sub: 'Origins of species, natural selection' },
+  { key: 'climate_change',         label: 'Climate Change',                sub: 'Environmental science, climate topics' },
+  { key: 'death_grief',            label: 'Death & Grief',                 sub: 'In English passages and Jarvis discussions' },
+  { key: 'divorce_family',         label: 'Divorce & Family Breakdown',    sub: 'Family structure topics' },
+  { key: 'violence_conflict',      label: 'Violence & Conflict',           sub: 'Beyond age-appropriate adventure stories' },
+  { key: 'relationships_attraction', label: 'Relationships & Attraction',  sub: 'Romantic relationships and attraction' },
+  { key: 'drugs_alcohol',          label: 'Drugs & Alcohol (Jarvis)',      sub: 'Jarvis conversations on substances' },
+  { key: 'political_topics',       label: 'Political Topics',              sub: 'Political opinions and debates' },
+  { key: 'religious_topics',       label: 'Religious Topics',              sub: 'Religious beliefs and practices' },
 ];
 
-export default function ParentSetup() {
-  const [step, setStep]     = useState(0); // 0: parent, 1: child, 2: preferences
+// ── City autocomplete using Nominatim (free, no key) ──────────────────────────
+function CityAutocomplete({ value, onChange }) {
+  const [query, setQuery]       = useState(value || '');
+  const [options, setOptions]   = useState([]);
+  const [open, setOpen]         = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const timer                   = useRef(null);
+
+  const search = useCallback(async (q) => {
+    if (q.length < 3) { setOptions([]); setOpen(false); return; }
+    setLoading(true);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=us&featuretype=city&format=json&limit=6&addressdetails=1`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      const data = await res.json();
+      const cities = data
+        .filter(d => d.address?.city || d.address?.town || d.address?.village)
+        .map(d => {
+          const city = d.address.city || d.address.town || d.address.village;
+          const state = d.address.state || '';
+          return { label: `${city}, ${state}`, city };
+        })
+        .filter((v, i, a) => a.findIndex(x => x.label === v.label) === i);
+      setOptions(cities);
+      setOpen(cities.length > 0);
+    } catch { setOptions([]); }
+    finally { setLoading(false); }
+  }, []);
+
+  function handleChange(e) {
+    const q = e.target.value;
+    setQuery(q);
+    onChange(q);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => search(q), 350);
+  }
+
+  function select(opt) {
+    setQuery(opt.label);
+    onChange(opt.label);
+    setOpen(false);
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type="text"
+        placeholder="Start typing your city..."
+        value={query}
+        onChange={handleChange}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        autoComplete="off"
+      />
+      {loading && <div className="autocomplete-loading">Searching...</div>}
+      {open && (
+        <div className="autocomplete-dropdown">
+          {options.map((opt, i) => (
+            <div key={i} className="autocomplete-item" onMouseDown={() => select(opt)}>
+              📍 {opt.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── School autocomplete using NCES API ────────────────────────────────────────
+function SchoolAutocomplete({ city, value, onChange }) {
+  const [query, setQuery]     = useState(value || '');
+  const [options, setOptions] = useState([]);
+  const [open, setOpen]       = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState('');
+  const timer                 = useRef(null);
+
+  const search = useCallback(async (q) => {
+    if (q.length < 3) { setOptions([]); setOpen(false); return; }
+    setLoading(true);
+    try {
+      // Extract city name only (remove state part)
+      const cityName = city ? city.split(',')[0].trim() : '';
+      const searchTerm = cityName ? `${q} ${cityName}` : q;
+      const url = `https://nces.ed.gov/ccd/schoolsearch/school_list.asp?Search=1&SchoolName=${encodeURIComponent(q)}&City=${encodeURIComponent(cityName)}&State=&Zip=&Miles=&NumOfStudentsRange=more&NumOfStudentsLow=&NumOfStudentsHigh=&Phone=&IncGrade=-1&LoGrade=-1&HiGrade=-1`;
+
+      // NCES doesn't have a clean JSON API so we use a fallback approach
+      // Use Open Data API for schools
+      const res = await fetch(
+        `https://public.opendatasoft.com/api/records/1.0/search/?dataset=us-public-schools&q=${encodeURIComponent(q)}&refine.city=${encodeURIComponent(cityName)}&rows=6&fields=name,city,state`
+      );
+      const data = await res.json();
+      const schools = (data.records || []).map(r => ({
+        label: `${r.fields.name} — ${r.fields.city}, ${r.fields.state}`,
+        name: r.fields.name
+      }));
+      setOptions(schools);
+      setOpen(schools.length > 0);
+    } catch {
+      setOptions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [city]);
+
+  function handleChange(e) {
+    const q = e.target.value;
+    setQuery(q);
+    onChange(q);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => search(q), 400);
+  }
+
+  function select(opt) {
+    setQuery(opt.name);
+    onChange(opt.name);
+    setOpen(false);
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type="text"
+        placeholder={city ? `Search schools in ${city.split(',')[0]}...` : 'Enter city first, then search school...'}
+        value={query}
+        onChange={handleChange}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        autoComplete="off"
+        disabled={!city}
+      />
+      {loading && <div className="autocomplete-loading">Searching schools...</div>}
+      {open && (
+        <div className="autocomplete-dropdown">
+          {options.map((opt, i) => (
+            <div key={i} className="autocomplete-item" onMouseDown={() => select(opt)}>
+              🏫 {opt.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Toggle switch ─────────────────────────────────────────────────────────────
+function Toggle({ checked, onChange }) {
+  return (
+    <label className="toggle-switch">
+      <input type="checkbox" checked={checked} onChange={onChange} />
+      <span className="toggle-track" />
+    </label>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+export default function ParentSetup() {
+  const [step, setStep]       = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState('');
+  const [parentId, setParentId]     = useState(null);
+  const [parentName, setParentName] = useState('');
+  const [childId, setChildId]       = useState(null);
+  const [childName, setChildName]   = useState('');
 
   // Parent fields
-  const [parentName, setParentName]   = useState('');
-  const [parentPin, setParentPin]     = useState('');
-  const [parentEmail, setParentEmail] = useState('');
-  const [parentId, setParentId]       = useState(null);
+  const [pName, setPName]   = useState('');
+  const [pPin, setPPin]     = useState('');
+  const [pEmail, setPEmail] = useState('');
 
   // Child fields
-  const [childName, setChildName]         = useState('');
-  const [childAge, setChildAge]           = useState('');
-  const [childGrade, setChildGrade]       = useState('');
-  const [childCity, setChildCity]         = useState('');
-  const [childSchool, setChildSchool]     = useState('');
-  const [childPin, setChildPin]           = useState('');
-  const [schoolMonth, setSchoolMonth]     = useState('');
-  const [schoolEndDate, setSchoolEndDate] = useState('');
+  const [cName, setCName]         = useState('');
+  const [cAge, setCAge]           = useState('');
+  const [cGrade, setCGrade]       = useState('');
+  const [cGender, setCGender]     = useState('');
+  const [cCity, setCCity]         = useState('');
+  const [cSchool, setCSchool]     = useState('');
+  const [cPin, setCPin]           = useState('');
+  const [cMonthStart, setCMonthStart] = useState('');
+  const [cEndDate, setCEndDate]   = useState('');
 
-  // Preferences — all off by default
+  // Preferences
   const [prefs, setPrefs] = useState(
     Object.fromEntries(SENSITIVE_TOPICS.map(t => [t.key, false]))
   );
@@ -58,85 +213,75 @@ export default function ParentSetup() {
     setPrefs(p => ({ ...p, [key]: !p[key] }));
   }
 
-  // Step 0 — Create parent account
-  async function handleParentSubmit(e) {
+  // ── Step 0: Parent account ──
+  async function submitParent(e) {
     e.preventDefault();
-    if (!parentName.trim() || !parentPin.trim()) {
-      return setError('Name and PIN are required.');
-    }
-    if (parentPin.length < 4) return setError('PIN must be at least 4 characters.');
+    if (!pName.trim()) return setError('Please enter your name.');
+    if (!pPin.trim() || pPin.length < 4) return setError('PIN must be at least 4 characters.');
     setError(''); setLoading(true);
-
     try {
       const codeId = sessionStorage.getItem('accio_setup_code_id');
       if (!codeId) { nav('/'); return; }
-
-      const res = await setupParent({
-        codeId,
-        name: parentName.trim(),
-        dashboardPin: parentPin.trim(),
-        email: parentEmail.trim() || undefined
-      });
-
+      const res = await setupParent({ codeId, name: pName.trim(), dashboardPin: pPin.trim(), email: pEmail.trim() || undefined });
       setParentId(res.parentId);
+      setParentName(pName.trim());
       session.setParent(res.parentId);
       sessionStorage.removeItem('accio_setup_code_id');
       setStep(1);
-    } catch (err) {
-      setError(err.message || 'Something went wrong.');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { setError(err.message || 'Something went wrong.'); }
+    finally { setLoading(false); }
   }
 
-  // Step 1 — Create first child
-  async function handleChildSubmit(e) {
+  // ── Step 1: Child ──
+  async function submitChild(e) {
     e.preventDefault();
-    if (!childName.trim() || !childAge || !childGrade || !childPin.trim()) {
-      return setError('Name, age, grade and PIN are required.');
-    }
-    if (childPin.length < 4) return setError('Child PIN must be at least 4 characters.');
+    if (!cName.trim()) return setError('Child\'s name is required.');
+    if (!cAge) return setError('Age is required.');
+    if (!cGrade) return setError('Grade is required.');
+    if (!cGender) return setError('Please select a gender.');
+    if (!cPin.trim() || cPin.length < 4) return setError('Child PIN must be at least 4 characters.');
     setError(''); setLoading(true);
-
     try {
-      await createChild({
+      const res = await createChild({
         parentId,
-        name: childName.trim(),
-        age: parseInt(childAge),
-        grade: parseInt(childGrade),
-        city: childCity.trim() || undefined,
-        school: childSchool.trim() || undefined,
-        pin: childPin.trim(),
-        schoolYearStartMonth: schoolMonth ? parseInt(schoolMonth) : undefined,
-        schoolYearEndDate: schoolEndDate || undefined
+        name: cName.trim(),
+        age: parseInt(cAge),
+        grade: parseInt(cGrade),
+        gender: cGender,
+        city: cCity || undefined,
+        school: cSchool || undefined,
+        pin: cPin.trim(),
+        schoolYearStartMonth: cMonthStart ? parseInt(cMonthStart) : undefined,
+        schoolYearEndDate: cEndDate || undefined
       });
-
+      setChildId(res.childId);
+      setChildName(cName.trim());
       setStep(2);
-    } catch (err) {
-      setError(err.message || 'Failed to create child profile.');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { setError(err.message || 'Failed to create child profile.'); }
+    finally { setLoading(false); }
   }
 
-  // Step 2 — Save preferences and go to child select
-  async function handlePrefsSubmit(e) {
+  // ── Step 2: Preferences ──
+  async function submitPrefs(e) {
     e.preventDefault();
-    // Preferences are saved when child login happens — stored in state for now
-    // In Phase 2 we'll wire the PUT /api/child/:id/preferences call here
-    nav('/select');
+    if (childId) {
+      try { await updatePreferences(childId, prefs); } catch {}
+    }
+    setStep(3);
   }
+
+  const stepLabels = ['Your Account', 'Add Child', 'Content Settings', 'All Set!'];
 
   return (
-    <div className="page">
-      <div className="card fade-in">
+    <div className="page" style={{ justifyContent: 'flex-start', paddingTop: 32, paddingBottom: 32 }}>
+      <div className="card fade-in" style={{ maxWidth: step === 1 ? 560 : 480 }}>
 
-        {/* Steps indicator */}
+        {/* Step indicator */}
         <div className="steps">
-          {['Your Account', 'Add Child', 'Content Settings'].map((s, i) => (
+          {stepLabels.map((s, i) => (
             <React.Fragment key={i}>
-              <div className={`step-dot ${i === step ? 'active' : i < step ? 'done' : ''}`} />
-              {i < 2 && <div style={{ width: 20, height: 1, background: 'var(--border)' }} />}
+              <div className={`step-dot ${i === step ? 'active' : i < step ? 'done' : ''}`} title={s} />
+              {i < stepLabels.length - 1 && <div style={{ width: 16, height: 1, background: 'var(--border)' }} />}
             </React.Fragment>
           ))}
         </div>
@@ -146,26 +291,26 @@ export default function ParentSetup() {
           <>
             <div className="accio-logo">Accio ✨</div>
             <div className="accio-tagline">Let's set up your family account</div>
-
-            <form onSubmit={handleParentSubmit}>
+            <form onSubmit={submitParent}>
               <div className="field">
-                <label>Your Name</label>
-                <input type="text" placeholder="e.g. Priya Singh"
-                  value={parentName} onChange={e => setParentName(e.target.value)} />
+                <label>Your Name <span className="required">*</span></label>
+                <input type="text" placeholder="e.g. Anu Gupta"
+                  value={pName} onChange={e => setPName(e.target.value)} />
+                <div className="field-hint">Enter your full name as you'd like to be addressed</div>
               </div>
               <div className="field">
-                <label>Email (optional — for future notifications)</label>
+                <label>Email <span className="optional">(optional)</span></label>
                 <input type="email" placeholder="you@example.com"
-                  value={parentEmail} onChange={e => setParentEmail(e.target.value)} />
+                  value={pEmail} onChange={e => setPEmail(e.target.value)} />
+                <div className="field-hint">For future notifications — we'll never spam you</div>
               </div>
               <div className="field">
-                <label>Your Dashboard PIN</label>
-                <input type="password" placeholder="Min 4 characters"
-                  value={parentPin} onChange={e => setParentPin(e.target.value)} />
+                <label>Dashboard PIN <span className="required">*</span></label>
+                <input type="password" placeholder="Set it now — min 4 characters"
+                  value={pPin} onChange={e => setPPin(e.target.value)} />
+                <div className="field-hint">You'll use this to access the parent dashboard</div>
               </div>
-
               {error && <div className="msg msg-error">{error}</div>}
-
               <button className="btn btn-primary" type="submit" disabled={loading}>
                 {loading ? 'Creating account...' : 'Continue →'}
               </button>
@@ -173,66 +318,86 @@ export default function ParentSetup() {
           </>
         )}
 
-        {/* ── STEP 1: First child ── */}
+        {/* ── STEP 1: Child ── */}
         {step === 1 && (
           <>
-            <h2 style={{ fontFamily: 'var(--font-display)', marginBottom: 4, fontSize: '1.4rem' }}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', marginBottom: 4 }}>
               Add your child
             </h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 24 }}>
-              You can add more children after setup.
+              Fields marked <span className="required">*</span> are required. You can add more children after setup.
             </p>
+            <form onSubmit={submitChild}>
+              <div className="setup-grid">
 
-            <form onSubmit={handleChildSubmit}>
-              <div className="about-me-grid">
                 <div className="field">
-                  <label>Child's Name</label>
+                  <label>Child's Name <span className="required">*</span></label>
                   <input type="text" placeholder="e.g. Aryan"
-                    value={childName} onChange={e => setChildName(e.target.value)} />
+                    value={cName} onChange={e => setCName(e.target.value)} />
+                  <div className="field-hint">First name your child goes by</div>
                 </div>
+
                 <div className="field">
-                  <label>Age</label>
+                  <label>Age <span className="required">*</span></label>
                   <input type="number" placeholder="e.g. 12" min="4" max="18"
-                    value={childAge} onChange={e => setChildAge(e.target.value)} />
+                    value={cAge} onChange={e => setCAge(e.target.value)} />
+                  <div className="field-hint">Current age of your child</div>
                 </div>
+
                 <div className="field">
-                  <label>Grade</label>
-                  <select value={childGrade} onChange={e => setChildGrade(e.target.value)}>
-                    <option value="">Select grade</option>
+                  <label>Grade <span className="required">*</span></label>
+                  <select value={cGrade} onChange={e => setCGrade(e.target.value)}>
+                    <option value="">Select current grade</option>
                     {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
                   </select>
+                  <div className="field-hint">Current school grade — drives curriculum level</div>
                 </div>
+
                 <div className="field">
-                  <label>City</label>
-                  <input type="text" placeholder="e.g. Chicago"
-                    value={childCity} onChange={e => setChildCity(e.target.value)} />
+                  <label>Gender <span className="required">*</span></label>
+                  <select value={cGender} onChange={e => setCGender(e.target.value)}>
+                    <option value="">Select gender</option>
+                    {GENDER_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                  <div className="field-hint">Helps personalise Jarvis's voice and tone</div>
                 </div>
-                <div className="field">
-                  <label>School</label>
-                  <input type="text" placeholder="School name"
-                    value={childSchool} onChange={e => setChildSchool(e.target.value)} />
+
+                <div className="field" style={{ gridColumn: '1 / -1' }}>
+                  <label>City <span className="optional">(optional)</span></label>
+                  <CityAutocomplete value={cCity} onChange={setCCity} />
+                  <div className="field-hint">Start typing — US cities will appear after 3 letters</div>
                 </div>
-                <div className="field">
-                  <label>Child's PIN</label>
-                  <input type="password" placeholder="Min 4 characters"
-                    value={childPin} onChange={e => setChildPin(e.target.value)} />
+
+                <div className="field" style={{ gridColumn: '1 / -1' }}>
+                  <label>School <span className="optional">(optional)</span></label>
+                  <SchoolAutocomplete city={cCity} value={cSchool} onChange={setCSchool} />
+                  <div className="field-hint">Enter city first, then search your school by name</div>
                 </div>
+
                 <div className="field">
-                  <label>School year started (month)</label>
-                  <select value={schoolMonth} onChange={e => setSchoolMonth(e.target.value)}>
+                  <label>Child's PIN <span className="required">*</span></label>
+                  <input type="password" placeholder="Set a PIN for this child"
+                    value={cPin} onChange={e => setCPin(e.target.value)} />
+                  <div className="field-hint">Min 4 characters — child uses this to log in</div>
+                </div>
+
+                <div className="field">
+                  <label>School year started <span className="optional">(optional)</span></label>
+                  <select value={cMonthStart} onChange={e => setCMonthStart(e.target.value)}>
                     <option value="">Select month</option>
                     {MONTHS.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
                   </select>
+                  <div className="field-hint">Helps calibrate where in the curriculum to start</div>
                 </div>
-                <div className="field">
-                  <label>School year ends</label>
-                  <input type="date" value={schoolEndDate}
-                    onChange={e => setSchoolEndDate(e.target.value)} />
+
+                <div className="field" style={{ gridColumn: '1 / -1' }}>
+                  <label>School year ends <span className="optional">(optional)</span></label>
+                  <input type="date" value={cEndDate} onChange={e => setCEndDate(e.target.value)} />
+                  <div className="field-hint">This helps pace the curriculum to match the school year — so your child covers the right topics before the year ends</div>
                 </div>
+
               </div>
-
               {error && <div className="msg msg-error">{error}</div>}
-
               <button className="btn btn-primary" type="submit" disabled={loading}>
                 {loading ? 'Saving...' : 'Continue →'}
               </button>
@@ -243,39 +408,58 @@ export default function ParentSetup() {
         {/* ── STEP 2: Content preferences ── */}
         {step === 2 && (
           <>
-            <h2 style={{ fontFamily: 'var(--font-display)', marginBottom: 4, fontSize: '1.4rem' }}>
-              Content settings
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', marginBottom: 8 }}>
+              Content Settings
             </h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 20 }}>
-              All sensitive topics are <strong style={{ color: 'var(--text-primary)' }}>off by default</strong>.
-              Turn on only what you're comfortable with. These apply across all subjects and Jarvis.
-            </p>
-
-            <form onSubmit={handlePrefsSubmit}>
+            <div className="content-settings-intro">
+              <p>
+                All content on Accio is age-appropriate and aligned to the <strong>US Common Core State Standards (CCSS)</strong> and <strong>Next Generation Science Standards (NGSS)</strong> — the same federal and state education standards your child follows in school.
+              </p>
+              <p style={{ marginTop: 8 }}>
+                We have built robust guardrails to ensure inappropriate content is never discussed. Sensitive topics are <strong>off by default</strong> — turn on only what you are comfortable with. These settings apply across all subjects and Jarvis conversations.
+              </p>
+            </div>
+            <form onSubmit={submitPrefs}>
               {SENSITIVE_TOPICS.map(t => (
                 <div className="toggle-row" key={t.key}>
                   <div>
                     <div className="toggle-label">{t.label}</div>
                     <div className="toggle-sub">{t.sub}</div>
                   </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={prefs[t.key]}
-                      onChange={() => togglePref(t.key)}
-                    />
-                    <span className="toggle-track" />
-                  </label>
+                  <Toggle checked={prefs[t.key]} onChange={() => togglePref(t.key)} />
                 </div>
               ))}
-
               <div style={{ marginTop: 24 }}>
-                <button className="btn btn-primary" type="submit">
-                  All done — let's go! 🎉
+                {error && <div className="msg msg-error">{error}</div>}
+                <button className="btn btn-primary" type="submit" disabled={loading}>
+                  {loading ? 'Saving...' : 'Save & Continue →'}
                 </button>
               </div>
             </form>
           </>
+        )}
+
+        {/* ── STEP 3: Handoff to child ── */}
+        {step === 3 && (
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <div style={{ fontSize: '4rem', marginBottom: 16 }}>🎉</div>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', marginBottom: 12 }}>
+              Great job, {parentName}!
+            </h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', lineHeight: 1.7, marginBottom: 32 }}>
+              Now please help <strong style={{ color: 'var(--text-primary)' }}>{childName}</strong> and me get to know each other better!
+            </p>
+            <div className="handoff-card">
+              <div style={{ fontSize: '2rem', marginBottom: 8 }}>👋</div>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                Hand the device to <strong style={{ color: 'var(--text-primary)' }}>{childName}</strong> — it's their turn now!
+              </p>
+            </div>
+            <button className="btn btn-primary" style={{ marginTop: 24 }}
+              onClick={() => nav('/select')}>
+              {childName} is ready! →
+            </button>
+          </div>
         )}
 
       </div>

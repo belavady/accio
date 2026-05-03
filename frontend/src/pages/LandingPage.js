@@ -9,7 +9,6 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(false);
   const nav = useNavigate();
 
-  // If already have a parent session, go straight to child select
   useEffect(() => {
     if (session.hasParent()) nav('/select');
   }, [nav]);
@@ -19,29 +18,21 @@ export default function LandingPage() {
     if (!code.trim()) return setError('Please enter your access code.');
     setError('');
     setLoading(true);
-
     try {
       const res = await validateCode(code.trim());
-
       if (!res.valid) {
-        setError('That code doesn\'t look right. Check with the person who shared it.');
+        setError("That code doesn't look right. Check with the person who shared it.");
         return;
       }
-
       session.setCode(res.codeId);
-
       if (res.parentExists) {
-        // Returning family — go to child select
         session.setParent(res.parentId);
         nav('/select');
       } else {
-        // New family — go to parent setup
-        // Store codeId in sessionStorage temporarily for setup page
         sessionStorage.setItem('accio_setup_code_id', res.codeId);
         nav('/parent-setup');
       }
-
-    } catch (err) {
+    } catch {
       setError('Something went wrong. Please try again.');
     } finally {
       setLoading(false);
@@ -52,11 +43,31 @@ export default function LandingPage() {
     <div className="page">
       <div className="card fade-in">
 
-        {/* Logo */}
         <div className="accio-logo">Accio ✨</div>
         <div className="accio-tagline">Your personal learning companion</div>
 
-        {/* Code form */}
+        {/* Trust signal */}
+        <div style={{
+          background: 'rgba(57,208,216,0.06)',
+          border: '1px solid rgba(57,208,216,0.15)',
+          borderRadius: 'var(--radius-md)',
+          padding: '10px 14px',
+          marginBottom: 24,
+          fontSize: '0.78rem',
+          color: 'var(--text-secondary)',
+          lineHeight: 1.5,
+          textAlign: 'center'
+        }}>
+          🛡️ Built for child safety · Governed by the{' '}
+          <button
+            onClick={() => nav('/privacy')}
+            style={{ background: 'none', border: 'none', color: 'var(--teal)', cursor: 'pointer', fontSize: '0.78rem', padding: 0, fontFamily: 'var(--font-body)' }}
+          >
+            Accio Constitution
+          </button>
+          {' '}· COPPA 2025 compliant
+        </div>
+
         <form onSubmit={handleSubmit}>
           <div className="field">
             <label>Access Code</label>
@@ -71,23 +82,34 @@ export default function LandingPage() {
               spellCheck={false}
             />
           </div>
-
           {error && <div className="msg msg-error">{error}</div>}
-
           <button className="btn btn-primary" type="submit" disabled={loading}>
             {loading ? 'Checking...' : "Let's Go! 🚀"}
           </button>
         </form>
 
+        {/* Parent dashboard link */}
+        {session.hasParent() && (
+          <button
+            className="btn btn-ghost"
+            style={{ marginTop: 12 }}
+            onClick={() => nav('/dashboard')}
+          >
+            Parent dashboard →
+          </button>
+        )}
+
       </div>
 
-      {/* Legal disclaimer */}
+      {/* Disclaimer */}
       <div className="disclaimer">
-        <strong>Private & Confidential.</strong> Accio is a private learning platform
-        for registered families only. Access is provided via invitation codes which
-        must not be shared or redistributed. Unauthorised access is not permitted.
-        All content is age-appropriate and tailored to registered child profiles.
-        User data is not shared with third parties.
+        <strong>Private & Confidential.</strong> Accio is a private, invite-only learning platform for registered families. Access codes must not be shared or redistributed. All content is age-appropriate and tailored to registered child profiles. We never show ads and never sell data.{' '}
+        <button
+          onClick={() => nav('/privacy')}
+          style={{ background: 'none', border: 'none', color: 'var(--teal)', cursor: 'pointer', fontSize: '0.72rem', padding: 0, fontFamily: 'var(--font-body)', textDecoration: 'underline' }}
+        >
+          Privacy Policy
+        </button>
       </div>
     </div>
   );
