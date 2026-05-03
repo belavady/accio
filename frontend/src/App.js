@@ -1,5 +1,5 @@
 import React from 'react';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './styles/global.css';
 
 import LandingPage      from './pages/LandingPage';
@@ -23,7 +23,7 @@ function RequireChild({ children }) {
 
 export default function App() {
   return (
-    <Router>
+    <BrowserRouter basename="/accio">
       <Routes>
         <Route path="/"               element={<LandingPage />} />
         <Route path="/privacy"        element={<PrivacyPolicy />} />
@@ -34,6 +34,6 @@ export default function App() {
         <Route path="/home"           element={<RequireChild><Home /></RequireChild>} />
         <Route path="*"               element={<Navigate to="/" replace />} />
       </Routes>
-    </Router>
+    </BrowserRouter>
   );
 }
