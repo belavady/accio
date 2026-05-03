@@ -10,9 +10,9 @@ const PORT = process.env.PORT || 3000;
 // ── CORS ─────────────────────────────────────────────────────────────────────
 app.use(cors({
   origin: [
-    process.env.FRONTEND_URL || 'http://localhost:3001',
-    'http://localhost:3000',
+    'https://belavady.github.io',
     'http://localhost:3001',
+    'http://localhost:3000',
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
