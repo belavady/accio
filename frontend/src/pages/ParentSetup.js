@@ -236,9 +236,11 @@ export default function ParentSetup() {
       const codeId = sessionStorage.getItem('accio_setup_code_id');
       if (!codeId) { nav('/'); return; }
       const res = await setupParent({ codeId, name: pName.trim(), dashboardPin: pPin.trim(), email: pEmail.trim() || undefined });
-      setParentId(res.parentId);
-      setParentName(pName.trim());
-      session.setParent(res.parentId, res.token);
+console.log('Setup response:', JSON.stringify(res));
+setParentId(res.parentId);
+setParentName(pName.trim());
+session.setParent(res.parentId, res.token);
+console.log('Token saved:', localStorage.getItem('accio_parent_token'));
       sessionStorage.removeItem('accio_setup_code_id');
       setStep(1);
     } catch (err) { setError(err.message || 'Something went wrong.'); }
