@@ -21,7 +21,7 @@ async function api(method, path, body, useToken = true) {
     const data = await res.json().catch(() => ({}));
     if (data.expired) {
       session.clearAll();
-      window.location.href = '/accio';
+      window.location.href = window.location.origin + '/accio/#/';
       return;
     }
     throw new Error('Authentication required');
