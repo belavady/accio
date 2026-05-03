@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/accio/static/css/main.9dad8dc5.css",
+    "main.js": "/accio/static/js/main.03571a95.js",
+    "index.html": "/accio/index.html",
+    "main.9dad8dc5.css.map": "/accio/static/css/main.9dad8dc5.css.map",
+    "main.03571a95.js.map": "/accio/static/js/main.03571a95.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.9dad8dc5.css",
+    "static/js/main.03571a95.js"
+  ]
+}
