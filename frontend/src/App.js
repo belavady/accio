@@ -23,7 +23,7 @@ function RequireChild({ children }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/accio">
       <Routes>
         <Route path="/"               element={<LandingPage />} />
         <Route path="/privacy"        element={<PrivacyPolicy />} />

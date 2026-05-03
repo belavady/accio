@@ -36,17 +36,22 @@ function CityAutocomplete({ value, onChange }) {
     if (q.length < 3) { setOptions([]); setOpen(false); return; }
     setLoading(true);
     try {
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=us&featuretype=city&format=json&limit=6&addressdetails=1`;
-      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=us&format=json&limit=6&addressdetails=1&featuretype=city`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'en', 'User-Agent': 'Accio-Learning-App' } });
       const data = await res.json();
+      const seen = new Set();
       const cities = data
-        .filter(d => d.address?.city || d.address?.town || d.address?.village)
+        .filter(d => d.address && (d.address.city || d.address.town || d.address.village || d.address.county))
         .map(d => {
-          const city = d.address.city || d.address.town || d.address.village;
+          const city = d.address.city || d.address.town || d.address.village || d.address.county;
           const state = d.address.state || '';
           return { label: `${city}, ${state}`, city };
         })
-        .filter((v, i, a) => a.findIndex(x => x.label === v.label) === i);
+        .filter(v => {
+          if (seen.has(v.label)) return false;
+          seen.add(v.label);
+          return true;
+        });
       setOptions(cities);
       setOpen(cities.length > 0);
     } catch { setOptions([]); }
@@ -103,25 +108,33 @@ function SchoolAutocomplete({ city, value, onChange }) {
     if (q.length < 3) { setOptions([]); setOpen(false); return; }
     setLoading(true);
     try {
-      // Extract city name only (remove state part)
       const cityName = city ? city.split(',')[0].trim() : '';
-      const searchTerm = cityName ? `${q} ${cityName}` : q;
-      const url = `https://nces.ed.gov/ccd/schoolsearch/school_list.asp?Search=1&SchoolName=${encodeURIComponent(q)}&City=${encodeURIComponent(cityName)}&State=&Zip=&Miles=&NumOfStudentsRange=more&NumOfStudentsLow=&NumOfStudentsHigh=&Phone=&IncGrade=-1&LoGrade=-1&HiGrade=-1`;
-
-      // NCES doesn't have a clean JSON API so we use a fallback approach
-      // Use Open Data API for schools
-      const res = await fetch(
-        `https://public.opendatasoft.com/api/records/1.0/search/?dataset=us-public-schools&q=${encodeURIComponent(q)}&refine.city=${encodeURIComponent(cityName)}&rows=6&fields=name,city,state`
-      );
+      // Use NCES Education Data API — free, official, no key needed
+      const params = new URLSearchParams({
+        search: q,
+        ...(cityName && { 'filter[city]': cityName }),
+        'filter[status]': 'Active',
+        'fields[schools]': 'name,city,state_code',
+        'page[size]': '8'
+      });
+      const res = await fetch(`https://educationdata.urban.org/api/v1/schools/ccd/directory/2021/?${params}`);
       const data = await res.json();
-      const schools = (data.records || []).map(r => ({
-        label: `${r.fields.name} — ${r.fields.city}, ${r.fields.state}`,
-        name: r.fields.name
+      const results = (data.results || []).map(s => ({
+        label: `${s.name} — ${s.city}, ${s.state_code}`,
+        name: s.name
       }));
-      setOptions(schools);
-      setOpen(schools.length > 0);
+      if (results.length > 0) {
+        setOptions(results);
+        setOpen(true);
+      } else {
+        // Fallback — allow manual entry, show typed value as option
+        setOptions([{ label: `Use "${q}"`, name: q }]);
+        setOpen(true);
+      }
     } catch {
-      setOptions([]);
+      // On any error allow manual entry
+      setOptions([{ label: `Use "${q}"`, name: q }]);
+      setOpen(true);
     } finally {
       setLoading(false);
     }
@@ -225,7 +238,7 @@ export default function ParentSetup() {
       const res = await setupParent({ codeId, name: pName.trim(), dashboardPin: pPin.trim(), email: pEmail.trim() || undefined });
       setParentId(res.parentId);
       setParentName(pName.trim());
-      session.setParent(res.parentId);
+      session.setParent(res.parentId, res.token);
       sessionStorage.removeItem('accio_setup_code_id');
       setStep(1);
     } catch (err) { setError(err.message || 'Something went wrong.'); }
@@ -328,72 +341,75 @@ export default function ParentSetup() {
               Fields marked <span className="required">*</span> are required. You can add more children after setup.
             </p>
             <form onSubmit={submitChild}>
-              <div className="setup-grid">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
 
-                <div className="field">
-                  <label>Child's Name <span className="required">*</span></label>
-                  <input type="text" placeholder="e.g. Aryan"
-                    value={cName} onChange={e => setCName(e.target.value)} />
-                  <div className="field-hint">First name your child goes by</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px', alignItems: 'start' }}>
+                  <div className="field">
+                    <label>Child's Name <span className="required">*</span></label>
+                    <input type="text" placeholder="e.g. Aryan"
+                      value={cName} onChange={e => setCName(e.target.value)} />
+                    <div className="field-hint">First name your child goes by</div>
+                  </div>
+                  <div className="field">
+                    <label>Age <span className="required">*</span></label>
+                    <input type="number" placeholder="e.g. 12" min="4" max="18"
+                      value={cAge} onChange={e => setCAge(e.target.value)} />
+                    <div className="field-hint">Current age of your child</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px', alignItems: 'start' }}>
+                  <div className="field">
+                    <label>Grade <span className="required">*</span></label>
+                    <select value={cGrade} onChange={e => setCGrade(e.target.value)}>
+                      <option value="">Select current grade</option>
+                      {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                    </select>
+                    <div className="field-hint">Current school grade</div>
+                  </div>
+                  <div className="field">
+                    <label>Gender <span className="required">*</span></label>
+                    <select value={cGender} onChange={e => setCGender(e.target.value)}>
+                      <option value="">Select gender</option>
+                      {GENDER_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                    <div className="field-hint">Helps personalise Jarvis's voice</div>
+                  </div>
                 </div>
 
                 <div className="field">
-                  <label>Age <span className="required">*</span></label>
-                  <input type="number" placeholder="e.g. 12" min="4" max="18"
-                    value={cAge} onChange={e => setCAge(e.target.value)} />
-                  <div className="field-hint">Current age of your child</div>
-                </div>
-
-                <div className="field">
-                  <label>Grade <span className="required">*</span></label>
-                  <select value={cGrade} onChange={e => setCGrade(e.target.value)}>
-                    <option value="">Select current grade</option>
-                    {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
-                  </select>
-                  <div className="field-hint">Current school grade — drives curriculum level</div>
-                </div>
-
-                <div className="field">
-                  <label>Gender <span className="required">*</span></label>
-                  <select value={cGender} onChange={e => setCGender(e.target.value)}>
-                    <option value="">Select gender</option>
-                    {GENDER_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
-                  </select>
-                  <div className="field-hint">Helps personalise Jarvis's voice and tone</div>
-                </div>
-
-                <div className="field" style={{ gridColumn: '1 / -1' }}>
                   <label>City <span className="optional">(optional)</span></label>
                   <CityAutocomplete value={cCity} onChange={setCCity} />
-                  <div className="field-hint">Start typing — US cities will appear after 3 letters</div>
+                  <div className="field-hint">Start typing — US cities appear after 3 letters</div>
                 </div>
 
-                <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <div className="field">
                   <label>School <span className="optional">(optional)</span></label>
                   <SchoolAutocomplete city={cCity} value={cSchool} onChange={setCSchool} />
-                  <div className="field-hint">Enter city first, then search your school by name</div>
+                  <div className="field-hint">Enter city first, then search your school</div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px', alignItems: 'start' }}>
+                  <div className="field">
+                    <label>Child's PIN <span className="required">*</span></label>
+                    <input type="password" placeholder="Set a PIN for this child"
+                      value={cPin} onChange={e => setCPin(e.target.value)} />
+                    <div className="field-hint">Min 4 characters — child uses this to log in</div>
+                  </div>
+                  <div className="field">
+                    <label>School year started <span className="optional">(optional)</span></label>
+                    <select value={cMonthStart} onChange={e => setCMonthStart(e.target.value)}>
+                      <option value="">Select month</option>
+                      {MONTHS.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
+                    </select>
+                    <div className="field-hint">Helps calibrate curriculum start point</div>
+                  </div>
                 </div>
 
                 <div className="field">
-                  <label>Child's PIN <span className="required">*</span></label>
-                  <input type="password" placeholder="Set a PIN for this child"
-                    value={cPin} onChange={e => setCPin(e.target.value)} />
-                  <div className="field-hint">Min 4 characters — child uses this to log in</div>
-                </div>
-
-                <div className="field">
-                  <label>School year started <span className="optional">(optional)</span></label>
-                  <select value={cMonthStart} onChange={e => setCMonthStart(e.target.value)}>
-                    <option value="">Select month</option>
-                    {MONTHS.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
-                  </select>
-                  <div className="field-hint">Helps calibrate where in the curriculum to start</div>
-                </div>
-
-                <div className="field" style={{ gridColumn: '1 / -1' }}>
                   <label>School year ends <span className="optional">(optional)</span></label>
                   <input type="date" value={cEndDate} onChange={e => setCEndDate(e.target.value)} />
-                  <div className="field-hint">This helps pace the curriculum to match the school year — so your child covers the right topics before the year ends</div>
+                  <div className="field-hint">Helps pace the curriculum to match the school year end date</div>
                 </div>
 
               </div>
