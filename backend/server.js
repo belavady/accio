@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const supabase = require('./supabase');
 const { aboutMePlayfulResponse } = require('./aboutMeHandler');
 const { recordConsent, deleteChild } = require('./complianceHandlers');
+const { autocompleteCities, autocompleteSchools } = require('./placesHandler');
 const {
   generateParentToken, generateChildToken,
   requireParent, requireChild,
@@ -13,7 +14,6 @@ const {
 } = require('./auth');
 
 const app = express();
-app.set('trust proxy', 1); // Required for Render's proxy layer
 const PORT = process.env.PORT || 3000;
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
@@ -376,7 +376,18 @@ app.get('/api/child/:childId/profile', requireChild, async (req, res) => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 // POST /api/about-me/response — Accio's playful response to About Me answers
-app.post('/api/about-me/response', requireChild, aiLimiter, aboutMePlayfulResponse);
+// Uses parent auth since child hasn't logged in yet at this stage
+app.post('/api/about-me/response', requireParent, aiLimiter, aboutMePlayfulResponse);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AUTOCOMPLETE ENDPOINTS (Google Places — proxied through backend)
+// ═════════════════════════════════════════════════════════════════════════════
+
+// POST /api/autocomplete/cities
+app.post('/api/autocomplete/cities', authLimiter, autocompleteCities);
+
+// POST /api/autocomplete/schools
+app.post('/api/autocomplete/schools', authLimiter, autocompleteSchools);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ADMIN ENDPOINTS

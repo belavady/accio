@@ -24,31 +24,28 @@ const SENSITIVE_TOPICS = [
   { key: 'religious_topics',       label: 'Religious Topics',              sub: 'Religious beliefs and practices' },
 ];
 
-// ── City autocomplete using Nominatim (free, no key) ──────────────────────────
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+
+// ── City autocomplete via Google Places (backend proxy) ───────────────────────
 function CityAutocomplete({ value, onChange }) {
-  const [query, setQuery]       = useState(value || '');
-  const [options, setOptions]   = useState([]);
-  const [open, setOpen]         = useState(false);
-  const [loading, setLoading]   = useState(false);
-  const timer                   = useRef(null);
+  const [query, setQuery]     = useState(value || '');
+  const [options, setOptions] = useState([]);
+  const [open, setOpen]       = useState(false);
+  const [loading, setLoading] = useState(false);
+  const timer                 = useRef(null);
 
   const search = useCallback(async (q) => {
     if (q.length < 3) { setOptions([]); setOpen(false); return; }
     setLoading(true);
     try {
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=us&featuretype=city&format=json&limit=6&addressdetails=1`;
-      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      const res = await fetch(`${API_URL}/api/autocomplete/cities`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q })
+      });
       const data = await res.json();
-      const cities = data
-        .filter(d => d.address?.city || d.address?.town || d.address?.village)
-        .map(d => {
-          const city = d.address.city || d.address.town || d.address.village;
-          const state = d.address.state || '';
-          return { label: `${city}, ${state}`, city };
-        })
-        .filter((v, i, a) => a.findIndex(x => x.label === v.label) === i);
-      setOptions(cities);
-      setOpen(cities.length > 0);
+      setOptions(data.suggestions || []);
+      setOpen((data.suggestions || []).length > 0);
     } catch { setOptions([]); }
     finally { setLoading(false); }
   }, []);
@@ -58,12 +55,12 @@ function CityAutocomplete({ value, onChange }) {
     setQuery(q);
     onChange(q);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => search(q), 350);
+    timer.current = setTimeout(() => search(q), 300);
   }
 
   function select(opt) {
-    setQuery(opt.label);
-    onChange(opt.label);
+    setQuery(opt.city);
+    onChange(opt.city);
     setOpen(false);
   }
 
@@ -91,16 +88,68 @@ function CityAutocomplete({ value, onChange }) {
   );
 }
 
-// ── School — simple manual input ─────────────────────────────────────────────
+// ── School autocomplete via Google Places (backend proxy) ─────────────────────
 function SchoolAutocomplete({ city, value, onChange }) {
+  const [query, setQuery]     = useState(value || '');
+  const [options, setOptions] = useState([]);
+  const [open, setOpen]       = useState(false);
+  const [loading, setLoading] = useState(false);
+  const timer                 = useRef(null);
+
+  const search = useCallback(async (q) => {
+    if (q.length < 3) { setOptions([]); setOpen(false); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/autocomplete/schools`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, city })
+      });
+      const data = await res.json();
+      setOptions(data.suggestions || []);
+      setOpen((data.suggestions || []).length > 0);
+    } catch { setOptions([]); }
+    finally { setLoading(false); }
+  }, [city]);
+
+  function handleChange(e) {
+    const q = e.target.value;
+    setQuery(q);
+    onChange(q);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => search(q), 300);
+  }
+
+  function select(opt) {
+    setQuery(opt.name);
+    onChange(opt.name);
+    setOpen(false);
+  }
+
   return (
-    <input
-      type="text"
-      placeholder={city ? `Type your school name in ${city.split(',')[0]}...` : 'Enter your school name...'}
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      autoComplete="off"
-    />
+    <div style={{ position: 'relative' }}>
+      <input
+        type="text"
+        placeholder={city ? `Search schools in ${city.split(',')[0]}...` : 'Enter your school name...'}
+        value={query}
+        onChange={handleChange}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        autoComplete="off"
+      />
+      {loading && <div className="autocomplete-loading">Searching schools...</div>}
+      {open && (
+        <div className="autocomplete-dropdown">
+          {options.map((opt, i) => (
+            <div key={i} className="autocomplete-item" onMouseDown={() => select(opt)}>
+              🏫 {opt.name}
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 8 }}>
+                {opt.label.split(',').slice(1).join(',').trim()}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -212,7 +261,7 @@ export default function ParentSetup() {
 
   return (
     <div className="page" style={{ justifyContent: 'flex-start', paddingTop: 32, paddingBottom: 32 }}>
-      <div className="card fade-in" style={{ maxWidth: step === 1 ? 560 : 480 }}>
+      <div className="card fade-in" style={{ maxWidth: step === 1 ? 560 : step === 2 ? 640 : 480 }}>
 
         {/* Step indicator */}
         <div className="steps">
@@ -358,15 +407,29 @@ export default function ParentSetup() {
               </p>
             </div>
             <form onSubmit={submitPrefs}>
-              {SENSITIVE_TOPICS.map(t => (
-                <div className="toggle-row" key={t.key}>
-                  <div>
-                    <div className="toggle-label">{t.label}</div>
-                    <div className="toggle-sub">{t.sub}</div>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '2px 12px',
+                marginBottom: 20
+              }}>
+                {SENSITIVE_TOPICS.map(t => (
+                  <div key={t.key} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 10px',
+                    borderBottom: '1px solid var(--border-light)',
+                    gap: 8
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.label}</div>
+                      <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.sub}</div>
+                    </div>
+                    <Toggle checked={prefs[t.key]} onChange={() => togglePref(t.key)} />
                   </div>
-                  <Toggle checked={prefs[t.key]} onChange={() => togglePref(t.key)} />
-                </div>
-              ))}
+                ))}
+              </div>
               <div style={{ marginTop: 24 }}>
                 {error && <div className="msg msg-error">{error}</div>}
                 <button className="btn btn-primary" type="submit" disabled={loading}>
